@@ -639,6 +639,99 @@ export class TaskMgrTest {
   }
 
   /**
+   * 测试16：isTaskAlive 状态检测
+   */
+  static async test16_isTaskAlive(): Promise<void> {
+    console.log("\n=== 测试16：isTaskAlive 状态检测 ===");
+    const mgr = TaskMgr.create();
+    const results: string[] = [];
+
+    // 阻塞任务，确保后续任务暂时留在队列中
+    mgr.addTask({
+      taskDesc: "阻塞任务",
+      task: () =>
+        new Promise((resolve) => {
+          setTimeout(resolve, 80);
+        }),
+    });
+
+    const asyncTaskId = mgr.addTask({
+      taskDesc: "异步任务-检测",
+      task: () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve("asyncDone"), 20);
+        }),
+      resolve: (result) => {
+        results.push(result as string);
+      },
+    });
+
+    const syncTaskId = mgr.addTask({
+      taskDesc: "同步任务-检测",
+      task: () => {
+        results.push("syncRun");
+        return "syncDone";
+      },
+      resolve: (result) => {
+        results.push(result);
+      },
+    });
+
+    const canceledTaskId = mgr.addTask({
+      taskDesc: "会被取消的任务",
+      task: () => {
+        results.push("shouldNotRun");
+      },
+    });
+
+    mgr.cancelTask(canceledTaskId);
+
+    this.assert(mgr.isTaskAlive(asyncTaskId), "异步任务在排队时应存在");
+    this.assert(mgr.isTaskAlive(syncTaskId), "同步任务在排队时应存在");
+    this.assert(!mgr.isTaskAlive(canceledTaskId), "取消后的任务视为不存在");
+
+    await this.wait(150);
+
+    this.assert(!mgr.isTaskAlive(asyncTaskId), "异步任务完成后应不存在");
+    this.assert(!mgr.isTaskAlive(syncTaskId), "同步任务完成后应不存在");
+    this.assert(!results.includes("shouldNotRun"), "被取消的任务不应执行");
+    this.assert(results.includes("asyncDone"), "异步任务应执行完成");
+    this.assert(results.includes("syncRun"), "同步任务应执行");
+  }
+
+  /**
+   * 测试17：clear 后异步任务回调不会执行
+   */
+  static async test17_clearStopsOldAsyncCallbacks(): Promise<void> {
+    console.log("\n=== 测试17：clear 后异步任务回调不会执行 ===");
+    const mgr = TaskMgr.create();
+    const results: string[] = [];
+
+    mgr.addTask({
+      taskDesc: "异步任务-将被清空",
+      task: () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve("done"), 50);
+        }),
+      resolve: (result) => {
+        results.push(result as string);
+      },
+      reject: (reason) => {
+        results.push("reject:" + reason);
+      },
+      catch: (reason) => {
+        results.push("catch:" + reason);
+      },
+    });
+
+    mgr.clear();
+
+    await this.wait(120);
+
+    this.assert(results.length === 0, "clear 后旧任务的回调不应执行");
+  }
+
+  /**
    * 运行所有测试
    */
   static async runAll(): Promise<void> {
@@ -665,6 +758,8 @@ export class TaskMgrTest {
     await this.test13_resolveChaining();
     await this.test14_emptyQueue();
     await this.test15_rejectAndCatchBoth();
+    await this.test16_isTaskAlive();
+    await this.test17_clearStopsOldAsyncCallbacks();
 
     console.log("\n========================================");
     console.log("测试结果汇总");
